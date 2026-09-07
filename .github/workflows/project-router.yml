@@ -33,7 +33,7 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             # Manual trigger — the path arrives via env, never interpolated into
             # this script. See the security note in ingest-cleanup.yml: a
-            # `${{ }}` expression inside a run block is substituted into the
+            # A GitHub expression inside a run block is substituted into the
             # shell SOURCE, so a crafted input would execute as code.
             artifacts="$ARTIFACT_PATH"
             case "$artifacts" in
