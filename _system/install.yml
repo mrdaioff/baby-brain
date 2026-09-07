@@ -1,0 +1,13 @@
+# Written by the install skill. Do not hand-edit unless you are correcting it.
+#
+# scripts/repo-health-scan.js reads `tier` to decide which checks apply. If this
+# says a tier you did not install, the health scan reports failures for
+# automation that is not there.
+
+tier: unset        # unset | 0 | 1
+installed: null
+vocabulary_applied: false
+removed: []
+notes: >
+  This repo has not been set up yet. Point your agent at
+  .agents/skills/install/SKILL.md.

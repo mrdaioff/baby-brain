@@ -1,0 +1,95 @@
+# Lint Frontmatter Workflow
+#
+# CI gate for knowledge_base/**/*.md frontmatter: fails the PR/push if a file
+# CHANGED in this diff has a `status` or `domain` outside
+# _system/knowledge_graph/taxonomy.yaml, or is missing a required frontmatter
+# field. See scripts/lint-frontmatter.mjs for the validation logic and full
+# rationale.
+#
+# Deliberately scoped to changed files only, not a full-repo scan. A taxonomy
+# change re-flags every pre-existing file that predates it, which turns one
+# unrelated PR into a hundred failures nobody caused. Changed-file diffing keeps
+# this workflow judging only what the PR actually touched.
+#
+# If you do change the taxonomy, normalise the backlog in its own commit rather
+# than widening this gate.
+#
+# Diffing pattern mirrors .github/workflows/ingest-content.yml's
+# before/after-SHA handling for push events, and uses the PR base/head SHAs
+# (more precise than a branch-name compare) for pull_request events.
+
+name: Lint Frontmatter
+
+on:
+  pull_request:
+    paths:
+      - "knowledge_base/**"
+      - "_system/knowledge_graph/taxonomy.yaml"
+      - "scripts/lint-frontmatter.mjs"
+  push:
+    branches: [main]
+    paths:
+      - "knowledge_base/**"
+      - "_system/knowledge_graph/taxonomy.yaml"
+      - "scripts/lint-frontmatter.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compute changed knowledge_base markdown files
+        id: changed
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            changed=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- 'knowledge_base/**/*.md' || echo "")
+          else
+            # push to main — mirror ingest-content.yml's before/after-SHA handling.
+            BEFORE="${{ github.event.before }}"
+            ZERO_SHA="0000000000000000000000000000000000000000"
+
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "$ZERO_SHA" ]; then
+              # No usable "before" ref (e.g. branch just created). Unlike
+              # ingest-content.yml's inbox fallback, we do NOT fall back to
+              # listing every file — that would turn this incremental gate
+              # into a full-backlog scan. Just skip.
+              echo "No usable before-SHA — skipping (not a repo-wide scan)."
+              changed=""
+            else
+              changed=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "${{ github.sha }}" -- 'knowledge_base/**/*.md' || echo "")
+            fi
+          fi
+
+          echo "$changed"
+          {
+            echo "files<<EOF"
+            echo "$changed"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Filenames are PR-author-controlled, so they go through env rather than
+      # being interpolated into the shell source (see ingest-cleanup.yml).
+      - name: Run frontmatter linter
+        if: steps.changed.outputs.files != ''
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
+        run: printf '%s\n' "$CHANGED_FILES" | node scripts/lint-frontmatter.mjs

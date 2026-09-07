@@ -1,0 +1,46 @@
+# Project Registry
+#
+# Used by the project router to match ingested transcripts to projects. This is
+# a PRE-FILTER, not the decision — an agent makes the final call. Its job is to
+# be cheap and to avoid obviously-wrong matches.
+#
+# ROUTING RULES, learned the hard way:
+#
+# - CLIENT-SIDE participants are the reliable signal. They appear on that
+#   project's calls and nowhere else.
+#
+# - YOUR OWN partners and collaborators are NOT a signal, even though they are
+#   on the call. Someone who appears across many unrelated projects will match
+#   everything, and the pre-filter stops filtering.
+#
+# - Keywords must be project-SPECIFIC. Avoid anything that describes your work
+#   in general — the name of your CRM, "outbound", "onboarding", your industry.
+#   Those appear on every call you have ever had.
+#
+# - When in doubt, be too narrow rather than too broad. A missed match gets
+#   filed by hand. A false match writes one client's call into another client's
+#   folder, and nobody notices until it matters.
+#
+# SCHEMA:
+#
+#   <slug>:
+#     name: Human-readable project name
+#     status: active | prospect | paused | closed | demo
+#     bucket: <id from _system/config.yml buckets.list>   # only if buckets enabled
+#     participants:
+#       - Client Side Person
+#     keywords:
+#       - project-specific-term
+#
+# Status means what it says. `active` is a signed engagement, not an optimistic
+# one — humans read this field to decide what is real revenue versus pipeline,
+# so do not inflate it.
+
+# example-client:
+#   name: Example Client — GTM Buildout
+#   status: prospect
+#   participants:
+#     - Jane Doe
+#   keywords:
+#     - example-client
+#     - northstar-migration

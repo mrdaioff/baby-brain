@@ -1,0 +1,289 @@
+# Ingest Content Workflow
+
+name: Ingest Content
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # `gh issue create --label` fails outright if the label does not exist, so a
+      # fresh fork would never create a single ingestion issue. `gh label create`
+      # is not idempotent, so an already-exists failure has to be tolerated.
+      #
+      # Tolerated, NOT blanket-swallowed. An earlier version ended each line with
+      # `|| echo "already exists"`, which also absorbed auth failures: with
+      # GH_PERSONAL_TOKEN unset the command failed, the step printed "label
+      # already exists", and the run went green while neither label was created.
+      # The next push to add content then failed at `gh issue create --label` —
+      # the original bug, now with a reassuring green run upstream pointing the
+      # diagnosis in the wrong direction.
+      - name: Ensure ingestion labels exist
+        env:
+          GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::GH_PERSONAL_TOKEN is not set. The ingestion pipeline cannot"
+            echo "::error::create issues without it. Add it under Settings -> Secrets and"
+            echo "::error::variables -> Actions, or remove .github/workflows/ if you are"
+            echo "::error::not running the hosted pipeline (see .agents/skills/install/SKILL.md)."
+            exit 1
+          fi
+
+          ensure_label() {
+            name="$1"; color="$2"; desc="$3"
+            if out=$(gh label create "$name" --color "$color" --description "$desc" 2>&1); then
+              echo "created label: $name"
+            elif printf '%s' "$out" | grep -qi "already exists"; then
+              echo "label already present: $name"
+            else
+              echo "::error::could not create label '$name': $out"
+              exit 1
+            fi
+          }
+
+          ensure_label "ingestion" "1D76DB" "Content awaiting librarian ingestion"
+          ensure_label "awaiting-processing" "FBCA04" "Not yet picked up by the ingestion agent"
+
+      - name: Process changed files
+        run: |
+          set -euo pipefail
+
+          # Get list of changed files
+          # Handle case where github.event.before is undefined (first push, direct push to main)
+          # Only fall back to git ls-files on the very first push (zero SHA), not on every empty diff.
+          # This prevents re-processing already-ingested files on unrelated commits.
+          BEFORE="${{ github.event.before }}"
+          ZERO_SHA="0000000000000000000000000000000000000000"
+
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "$ZERO_SHA" ]; then
+            # True first push — list everything currently in inbox
+            changed=$(git ls-files intake/inbox/ 2>/dev/null | grep -v '\.gitkeep$' | grep -v '/processed/' || echo "")
+          else
+            # Normal push — only pick up files genuinely added/modified in this commit
+            changed=$(git diff --name-only "$BEFORE" "${{ github.sha }}" 2>/dev/null | grep '^intake/inbox/' || echo "")
+          fi
+
+          if [ -z "$changed" ]; then
+            echo "No new files to process"
+            exit 0
+          fi
+
+          while IFS= read -r file; do
+            if [ -f "$file" ]; then
+              echo "Processing: $file"
+
+              # Extract file metadata
+              filename=$(basename "$file")
+              extension="${filename##*.}"
+              file_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "unknown")
+
+              # Detect content type based on extension and filename patterns
+              content_type=""
+              case "$filename" in
+                *[Nn]ewsletter*)
+                  content_type="newsletter"
+                  ;;
+                *[Pp]odcast*)
+                  content_type="podcast"
+                  ;;
+                *[Vv]ideo*|*[Yy]outube*)
+                  content_type="video"
+                  ;;
+                *[Ss]ocial*|*[Ll]inkedin*|*[Tt]witter*)
+                  content_type="social"
+                  ;;
+                *[Aa]rticle*)
+                  content_type="article"
+                  ;;
+                *[Tt]ranscript*)
+                  content_type="transcript"
+                  ;;
+                *)
+                  # Fallback to extension detection
+                  case "$extension" in
+                    md|txt)
+                      content_type="transcript"
+                      ;;
+                    pdf)
+                      content_type="article"
+                      ;;
+                    *)
+                      content_type="transcript"
+                      ;;
+                  esac
+                  ;;
+              esac
+
+              # Build issue body in a temp file (avoids YAML/heredoc indentation issues)
+              temp_body=$(mktemp)
+              temp_excerpt=$(mktemp)
+              
+              # Calculate file size — display as bytes when < 1 KB to avoid showing "0 KB"
+              FILE_SIZE=$(wc -c < "$file")
+              FILE_LINES=$(wc -l < "$file")
+              if [ "$FILE_SIZE" -lt 1024 ]; then
+                FILE_SIZE_DISPLAY="${FILE_SIZE} B"
+              else
+                FILE_SIZE_KB=$((FILE_SIZE / 1024))
+                FILE_SIZE_DISPLAY="${FILE_SIZE_KB} KB"
+              fi
+
+              # Get repo variables
+              REPO="${{ github.repository }}"
+              BRANCH="${{ github.ref_name }}"
+              FILE_RELATIVE_PATH="${file#./}"
+
+              # Determine if we need to truncate
+              EXCERPT_LINES=50
+              EXCERPT_CHARS=1000
+              MAX_BODY_SIZE=50000
+
+              if [ "$FILE_SIZE" -gt "$MAX_BODY_SIZE" ]; then
+                # Truncate: take first N chars, then first N lines of that.
+                # (Byte-cap first, via a temp file rather than a pipe, so a downstream
+                # head exiting early never SIGPIPEs an upstream head still writing —
+                # this bit a 51KB/25-line newsletter file on 2026-07-18.)
+                head -c "$EXCERPT_CHARS" "$file" > "${temp_excerpt}.raw"
+                head -n "$EXCERPT_LINES" "${temp_excerpt}.raw" > "$temp_excerpt"
+                rm -f "${temp_excerpt}.raw"
+                TRUNCATED="yes"
+              else
+                # Use full content
+                cp "$file" "$temp_excerpt"
+                TRUNCATED="no"
+              fi
+
+              # Build the formatted issue body
+              {
+                printf '%s\n' "@claude Please ingest this content using the librarian protocol."
+                printf '\n'
+
+                printf '%s\n' "## File Excerpt"
+                printf '\n'
+                cat "$temp_excerpt"
+                printf '\n'
+                printf '%s\n' "---"
+                printf '\n'
+
+                printf '%s\n' "**File Information:**"
+                printf '%s\n' "- **Path:** \`$FILE_RELATIVE_PATH\`"
+                printf '%s\n' "- **Size:** $FILE_SIZE_DISPLAY"
+                printf '\n'
+
+                printf '%s\n' "**Links:**"
+                printf '%s\n' "- [📄 View Full File](https://github.com/$REPO/blob/$BRANCH/$FILE_RELATIVE_PATH)"
+                printf '%s\n' "- [📋 Raw Content](https://github.com/$REPO/raw/$BRANCH/$FILE_RELATIVE_PATH)"
+                printf '\n'
+
+                printf '%s\n' "**File Details**"
+                printf '%s\n' "- Filename: ${filename}"
+                printf '%s\n' "- Type: ${content_type}"
+                printf '\n'
+
+                printf '%s\n' "**Processing Instructions**"
+                printf '%s\n' "Follow the librarian skill at .claude/skills/librarian/SKILL.md (canonical source: .agents/skills/librarian/SKILL.md):"
+                printf '%s\n' "1. Decide FIRST whether this is first-party or third-party, per the skill: match speaker labels against identity.aliases and identity.teammates in _system/config.yml. Do not assume third-party."
+                printf '%s\n' "2. Extract atomic concepts per librarian extraction protocol"
+                printf '%s\n' "3. Create knowledge_base entries with proper attribution"
+                printf '%s\n' "4. Preserve speaker/author attribution chains"
+                printf '\n'
+
+                printf '%s\n' "## PR Creation Requirement"
+                printf '%s\n' "⚠️ **IMPORTANT:** After committing your changes, you MUST open a PR immediately using the gh CLI:"
+                printf '%s\n' "\`\`\`"
+                printf '%s\n' "gh pr create --base main --title \"ingest: $filename\" --body \"Fixes #<this-issue-number>\""
+                printf '%s\n' "\`\`\`"
+                printf '%s\n' "- Do NOT leave the branch without opening a PR — the auto-merge workflow requires a PR to trigger."
+                printf '%s\n' "- **Required format:** \`Fixes #<this-issue-number>\` in the PR body so the issue closes on merge."
+                printf '\n'
+
+                printf '%s\n' "**Reference**"
+                printf '%s\n' "- Librarian skill: .claude/skills/librarian/SKILL.md"
+                printf '%s\n' "- First-party destination: brand/artifacts/ (plus brand/transcripts/)"
+                printf '%s\n' "- Third-party destinations: library/articles, library/podcasts, library/videos, library/newsletters, library/social"
+                printf '\n'
+
+                printf '%s\n' "**Status:** ⏳ Awaiting processing"
+                if [ "$TRUNCATED" = "yes" ]; then
+                  printf '\n'
+                  printf '%s\n' "_Note: Content truncated for display. View full file using links above._"
+                fi
+                printf '\n'
+
+                printf '%s\n' "---"
+                printf '%s\n' "*This issue was automatically created by GitHub Actions workflow: .github/workflows/ingest-content.yml*"
+              } > "$temp_body"
+              
+              # Clean up excerpt temp file
+              rm -f "$temp_excerpt"
+
+              # Create GitHub Issue
+              issue_title="[Ingest] $filename"
+
+              # Check if issue already exists to prevent duplicates
+              # Must use --state all so already-closed issues are also found.
+              # Use "in:title" to match the exact title, not just keywords.
+              existing_issue=$(gh issue list \
+                --search "\"$issue_title\" in:title" \
+                --state all \
+                --limit 1 \
+                --json number \
+                --jq '.[0].number' 2>/dev/null || echo "")
+
+              if [ -n "$existing_issue" ]; then
+                echo "Issue already exists for $filename (Issue #$existing_issue)"
+              else
+                echo "Creating issue for $filename"
+                # Create issue and capture output (URL)
+                if issue_url=$(gh issue create \
+                  --repo "${{ github.repository }}" \
+                  --title "$issue_title" \
+                  --body-file "$temp_body" \
+                  --label "ingestion" \
+                  --label "awaiting-processing"); then
+                  
+                  echo "Successfully created issue for $filename: $issue_url"
+                  
+                  # Extract issue number from URL (last segment)
+                  issue_number=${issue_url##*/}
+                  
+                  # Update body with self-reference
+                  echo "Updating issue #$issue_number with self-reference..."
+                  {
+                    cat "$temp_body"
+                    printf '\n\n'
+                    printf '%s\n' "**OFFICIAL ISSUE REFERENCE:** Ref: #$issue_number"
+                  } > "${temp_body}.new"
+                  
+                  if gh issue edit "$issue_number" --body-file "${temp_body}.new"; then
+                    echo "Successfully stamped issue #$issue_number with reference"
+                  else
+                    echo "Warning: Failed to stamp issue #$issue_number with reference"
+                  fi
+                  rm -f "${temp_body}.new"
+                  
+                else
+                  echo "ERROR: Failed to create issue for $filename"
+                  echo "GH_TOKEN is set: $([ -n "$GH_TOKEN" ] && echo "yes" || echo "no")"
+                  exit 1
+                fi
+              fi
+
+              # Clean up temp file
+              rm -f "$temp_body"
+            fi
+          done <<< "$changed"
+        env:
+          GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}

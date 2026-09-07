@@ -1,0 +1,27 @@
+domains:
+  knowledge_base: [business, career, legal, marketing, methodology, operational, philosophy, sales, strategy, technical]
+  brand: [voice, artifacts, opinions]
+  library: [newsletters, podcasts, videos, social, articles]
+node_types: [concept, framework, artifact, stance, reference]
+
+status_lifecycle:
+  blessed:
+    - emergent      # New concept, extracted from sources, not yet tested in content
+    - validated     # Used successfully in 1+ pieces of generated content
+    - canonical     # Used in 3+ pieces; proven repeatable pattern
+  
+  definitions:
+    emergent: |
+      Concept identified from transcripts or external sources.
+      Not yet validated through content generation.
+      May be refined or discarded based on testing.
+    
+    validated: |
+      Concept successfully used in at least one piece of generated content.
+      Proven to communicate clearly to audience.
+      Safe to reference but still monitoring.
+    
+    canonical: |
+      Concept used across 3+ pieces of content.
+      Audience recognizes it. Becomes repeatable, trusted pattern.
+      Core to your intellectual framework.

@@ -1,0 +1,239 @@
+name: Auto-merge Ingestion PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # ─── Job 1: triggered on PR open / update — queue the auto-merge ───────────
+  check-and-merge:
+    # Don't run this job for the 'closed' event; that's handled by close-linked-issues
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    # Serialize runs per-PR: an 'opened' event and a near-simultaneous
+    # 'synchronize' event used to race to merge the same PR, and the loser
+    # would hit `gh pr merge` on an already-merged PR and fail loudly (exit 1)
+    # even though the PR still merged fine via the winner. Queuing instead of
+    # canceling means the second run still executes the "already merged?"
+    # guard below and exits clean instead of failing.
+    concurrency:
+      group: auto-merge-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check for Ingestion Context
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Match ONLY on a linked issue carrying an automation label.
+          #
+          # There used to be a title shortcut here: any PR whose title contained
+          # "ingest", "ingestion" or "router" was merged without review. That is
+          # far too broad — it squash-merged a hand-written PR modifying this
+          # very workflow file, unreviewed, seconds after it opened. A title is
+          # author-controlled prose; the label is applied by the automation that
+          # actually created the work, so it is the only trustworthy signal.
+          #
+          # Both producers are covered:
+          #   ingest-content.yml  -> label 'ingestion'
+          #   project-router.sh   -> label 'project-routing'
+          # A PR with no linked labelled issue is a human PR. Leave it alone.
+          #
+          # GH_REPO is set so gh CLI doesn't need git context.
+          linked_issues=$(gh pr view "$PR_URL" --json closingIssuesReferences \
+            --jq '.closingIssuesReferences[].number' || true)
+
+          if [ -z "$linked_issues" ]; then
+            echo "No linked closing issues — treating as a human PR."
+            echo "match=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          for issue_num in $linked_issues; do
+            labels=$(gh issue view "$issue_num" --json labels --jq '.labels[].name' || true)
+            if echo "$labels" | grep -qxE 'ingestion|project-routing'; then
+              echo "Issue #$issue_num carries an automation label — auto-merging."
+              echo "match=true" >> $GITHUB_OUTPUT
+              echo "reason=linked_issue" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+
+          echo "match=false" >> $GITHUB_OUTPUT
+
+      - name: Approve and Merge
+        if: steps.check.outputs.match == 'true'
+        env:
+          # Must use GH_PERSONAL_TOKEN (PAT) — not GITHUB_TOKEN — so the
+          # resulting push to main is treated as a real user event and triggers
+          # downstream workflows (project-router.yml, etc.). GITHUB_TOKEN-
+          # triggered pushes are suppressed by GitHub and never fire other workflows.
+          GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          echo "Merging because: ${{ steps.check.outputs.reason }}"
+
+          # Skip if a concurrent/earlier run already merged (or closed) this
+          # PR — makes the job idempotent under the concurrency queue above,
+          # instead of failing on `gh pr merge` of an already-merged PR.
+          # `merged` is not a valid `gh pr view --json` field (only `state`,
+          # `mergedAt`, `mergeCommit` are) — using it here made this check
+          # itself fail with "Unknown JSON field: merged", killing every
+          # ingestion PR's auto-merge outright. Confirmed root cause 2026-07-18.
+          pr_state=$(gh pr view "$PR_URL" --json state --jq '.state')
+          if [ "$pr_state" != "OPEN" ]; then
+            echo "PR is already $pr_state — skipping merge."
+            exit 0
+          fi
+
+          # No `gh pr review --approve` here: the PAT owner is always the PR
+          # author (the cloud agent pushes under that identity), so self-approval
+          # errors with "Can not approve your own pull request".
+          #
+          # This is a direct squash merge, not `--auto`, because `--auto` only
+          # works when branch protection is enabled. If you DO turn on branch
+          # protection with required reviews, this step will start failing — an
+          # unapprovable PR cannot be merged by its own author. Either exempt
+          # this workflow, or switch to `--auto` and let the queue handle it.
+          #
+          # Squash merging must also be enabled in the repo's settings.
+          gh pr merge --squash "$PR_URL"
+
+      - name: Close Linked Ingestion Issues
+        if: steps.check.outputs.match == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # gh pr merge triggers a closed event but GITHUB_TOKEN-triggered events
+          # don't spawn new workflow runs, so Job 2 never fires. Close issues here
+          # instead by parsing Fixes/Closes keywords directly from the PR body.
+          pr_body=$(gh pr view "$PR_URL" --json body --jq '.body')
+          # `|| true` is load-bearing: grep exits 1 when it matches nothing, and
+          # this step runs under `bash -e`, so without it the assignment kills
+          # the step and the empty-check below is never reached. That turned any
+          # PR without a Fixes/Closes reference into a red run.
+          issue_nums=$(echo "$pr_body" | grep -ioP '(?:fix(?:es)?|close[sd]?|resolve[sd]?)\s+#\K\d+' || true)
+
+          if [ -z "$issue_nums" ]; then
+            echo "No Fixes/Closes references found in PR body"
+            exit 0
+          fi
+
+          for issue_num in $issue_nums; do
+            state=$(gh issue view "$issue_num" --json state --jq '.state')
+            if echo "$state" | grep -qi "open"; then
+              echo "Closing issue #$issue_num"
+              gh issue close "$issue_num" \
+                --comment "Auto-closed: PR #${PR_NUMBER} was successfully merged."
+            else
+              echo "Issue #$issue_num already closed, skipping"
+            fi
+          done
+
+  # ─── Job 2: triggered ONLY after the PR is actually merged ──────────────────
+  close-linked-issues:
+    # Run on all close events; merge status is verified via API with retry logic
+    # to handle race conditions where github.event.pull_request.merged may not be set
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR Merge Status
+        id: verify-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          max_retries=3
+          retry_delay=2
+          attempt=1
+          is_merged="false"
+
+          while [ $attempt -le $max_retries ]; do
+            echo "Checking merge status (attempt $attempt/$max_retries)..."
+
+            # Query GitHub API for actual merge status via gh CLI.
+            # `merged` is not a valid `--json` field (see Job 1's identical
+            # fix above) — this call silently fell back to "null" every time
+            # via the `|| echo` below, so this loop always retried out and
+            # fell through to `is_merged=false`, silently skipping issue
+            # auto-close on every merge. Use `state` (OPEN/CLOSED/MERGED).
+            merge_status=$(gh pr view "$PR_URL" --json state --jq '.state' 2>/dev/null || echo "null")
+
+            if [ "$merge_status" = "MERGED" ]; then
+              echo "PR is merged (API confirmed)"
+              is_merged="true"
+              break
+            elif [ "$merge_status" = "OPEN" ] || [ "$merge_status" = "CLOSED" ]; then
+              echo "PR is not merged (API confirmed)"
+              is_merged="false"
+              break
+            else
+              echo "Could not determine merge status, retrying in ${retry_delay}s..."
+              sleep $retry_delay
+              attempt=$((attempt + 1))
+            fi
+          done
+
+          echo "is_merged=$is_merged" >> $GITHUB_OUTPUT
+          echo "Final merge status: $is_merged"
+
+      - name: Check for Ingestion Context
+        if: steps.verify-merge.outputs.is_merged == 'true'
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Same rule as Job 1: match only on a linked issue carrying an
+          # automation label, never on the PR title (author-controlled prose).
+          linked_issues=$(gh pr view "$PR_URL" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
+          for issue_num in $linked_issues; do
+            if gh issue view "$issue_num" --json labels --jq '.labels[].name' | grep -q "ingestion"; then
+              echo "match=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+
+          echo "match=false" >> $GITHUB_OUTPUT
+
+      - name: Close Linked Ingestion Issues
+        if: steps.verify-merge.outputs.is_merged == 'true' && steps.check.outputs.match == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "PR #$PR_NUMBER was merged. Closing linked ingestion issues..."
+
+          linked_issues=$(gh pr view "$PR_URL" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
+
+          if [ -z "$linked_issues" ]; then
+            echo "No linked issues found"
+            exit 0
+          fi
+
+          for issue_num in $linked_issues; do
+            # Only close issues that carry the ingestion label — skip unrelated issues
+            if gh issue view "$issue_num" --json labels --jq '.labels[].name' | grep -q "ingestion"; then
+              echo "Closing issue #$issue_num (ingestion label confirmed)"
+              gh issue close "$issue_num" \
+                --comment "Auto-closed: PR #${PR_NUMBER} was successfully merged."
+            else
+              echo "Skipping issue #$issue_num (no ingestion label)"
+            fi
+          done

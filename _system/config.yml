@@ -1,0 +1,86 @@
+# Repo configuration — the one file you edit before anything else works.
+#
+# Two kinds of setting live here, and they behave differently:
+#
+#   identity.*    Read at RUNTIME. Skills consult these on every ingestion to
+#                 decide whether a piece of content is yours or someone else's.
+#                 Add to `aliases` whenever a transcript spells your name a new
+#                 way. Changing these takes effect immediately.
+#
+#   vocabulary.*  Applied ONCE, at install time. The install skill physically
+#                 renames the directories and rewrites every reference to them
+#                 across the tree. After that, the repo is literal and
+#                 self-consistent — nothing looks a name up at runtime.
+#                 Editing these later does nothing on its own; re-run the
+#                 rename step of the install skill instead.
+#
+# Why the split: runtime indirection is fine for a list of names that changes
+# often. It is a liability for directory paths, because every skill, script,
+# workflow, and agent prompt would have to resolve a variable before touching
+# the filesystem — and agents routinely forget to. A one-time rename keeps the
+# repo readable and keeps the paths in the skills honest.
+
+identity:
+  # Your name as it appears in meeting transcripts, and every variant of it.
+  # The librarian skill matches speaker labels against this list to route
+  # content to brand/ (yours) or library/ (someone else's). Get this wrong and
+  # your own calls get filed as third-party material.
+  owner: "Your Name"
+  aliases:
+    - "Your Name"
+    - "Me"
+    # Add nicknames, accented/unaccented spellings, maiden names, the way your
+    # recorder mangles it, the way clients say it. Over-include: a false match
+    # on your own name is harmless, a miss is not.
+
+  # Colleagues whose work is still FIRST-PARTY to your organisation even when
+  # you were not on the call. A teammate's client discovery call and an internal
+  # standup you missed are both your organisation's own work product — they
+  # belong in brand/, not library/.
+  #
+  # Leave empty if you work alone. Do not put clients here.
+  teammates: []
+
+  # Optional. Used for attribution in generated content and for filtering your
+  # own contributions out of ingested third-party threads.
+  handles:
+    email: ""
+    linkedin: ""
+    github: ""
+
+vocabulary:
+  # What you call a unit of client work. Pick the word your business actually
+  # uses — the install skill renames the directory to match.
+  #   projects     — default; consulting, agencies, freelance
+  #   clients      — retainer/account-managed relationships
+  #   engagements  — professional services, audit, legal
+  #   opportunities— sales-led, pre-contract pipeline
+  #   matters      — legal
+  #   deals        — investing, M&A, brokerage
+  projects_dir: projects
+
+  # What you call the singular noun, for prose inside generated files.
+  project_noun: project
+
+  # Where first-party source material lands. Rename if "brand" reads wrong for
+  # you — "own", "primary", and "source" are common alternatives.
+  first_party_dir: brand
+
+  # Where third-party material lands.
+  third_party_dir: library
+
+buckets:
+  # Optional. If you work under more than one commercial identity — your own
+  # clients, a white-label partner, an agency you subcontract to — list them
+  # here and the project-creation skill will force a choice instead of
+  # guessing. Leave empty if everything you do is under one banner.
+  #
+  # This exists because mixing them is a real and expensive error: work billed
+  # to the wrong entity, a client name mentioned to the wrong partner.
+  #
+  # - id: own
+  #   label: "My own clients"
+  # - id: partner-x
+  #   label: "White-label delivery for Partner X"
+  enabled: false
+  list: []

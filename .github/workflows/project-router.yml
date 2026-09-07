@@ -1,0 +1,73 @@
+name: Project Router
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'brand/artifacts/**'
+  workflow_dispatch:
+    inputs:
+      artifact_path:
+        description: 'Path to artifact file (e.g. brand/artifacts/2026-03-19_example.md)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Identify and route new artifacts
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Manual trigger — the path arrives via env, never interpolated into
+            # this script. See the security note in ingest-cleanup.yml: a
+            # `${{ }}` expression inside a run block is substituted into the
+            # shell SOURCE, so a crafted input would execute as code.
+            artifacts="$ARTIFACT_PATH"
+            case "$artifacts" in
+              brand/artifacts/*) : ;;
+              *) echo "::error::artifact_path must be under brand/artifacts/ (got '$artifacts')"; exit 1 ;;
+            esac
+            case "$artifacts" in
+              *..*) echo "::error::artifact_path must not contain '..'"; exit 1 ;;
+            esac
+          else
+            # Push trigger — find new/changed artifacts via git diff
+            BEFORE="${{ github.event.before }}"
+            ZERO_SHA="0000000000000000000000000000000000000000"
+
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "$ZERO_SHA" ]; then
+              artifacts=$(git ls-files brand/artifacts/ 2>/dev/null || echo "")
+            else
+              artifacts=$(git diff --name-only "$BEFORE" "${{ github.sha }}" 2>/dev/null | grep '^brand/artifacts/' || echo "")
+            fi
+          fi
+
+          if [ -z "$artifacts" ]; then
+            echo "No new artifacts to route"
+            exit 0
+          fi
+
+          while IFS= read -r artifact; do
+            if [ -f "$artifact" ]; then
+              echo "Routing: $artifact"
+              bash scripts/project-router.sh "$artifact"
+            fi
+          done <<< "$artifacts"
+        env:
+          GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ARTIFACT_PATH: ${{ github.event.inputs.artifact_path }}

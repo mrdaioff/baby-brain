@@ -1,0 +1,29 @@
+.DS_Store
+node_modules/
+# Every .env variant. `.env` alone does not match .env.local or .env.production,
+# which is how a real credential ends up committed by someone who assumed it did.
+.env
+.env.*
+!.env.example
+*.log
+*.swp
+*.swo
+dist/
+coverage/
+.eslintcache
+
+# Local state from job runners and hosting CLIs, if you build the capture
+# extension (docs/automated-capture.md). Harmless to keep otherwise.
+.trigger/
+.vercel/
+
+# Dedup logs are intentionally committed — re-include after the *.log rule above.
+# The whole point is that they survive across runs and machines.
+!.github/logs/*.log
+
+# Agent private stores. These are caches of the committed files, never the
+# authority (see .agents/memory/index.md). Committing one gives it a weight it
+# should not have, and it will drift from the real record.
+# Add your own CLI's directory here when you adopt a new tool.
+.commandcode/
+.aider*

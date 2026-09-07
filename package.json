@@ -1,0 +1,22 @@
+{
+  "name": "baby-brain",
+  "version": "1.0.0",
+  "description": "Seed for a git-tracked knowledge system your AI agents can work in",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "sync:agents": "node scripts/sync-agent-skills.mjs && node scripts/sync-agent-entrypoints.mjs",
+    "sync:agents:check": "node scripts/sync-agent-skills.mjs --check && node scripts/sync-agent-entrypoints.mjs --check",
+    "lint:frontmatter": "node scripts/lint-frontmatter.mjs",
+    "health": "node scripts/repo-health-scan.js",
+    "rollup:open-items": "node scripts/rollup-open-items.mjs"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "//dependencies": "gray-matter is the only runtime dependency: the frontmatter linter uses it."
+}

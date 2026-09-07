@@ -1,0 +1,64 @@
+# Check Agent Sync Workflow
+#
+# Single CI gate for everything generated from the canonical agent-instruction
+# sources (see .agents/README.md):
+#
+#   .agents/agent.md    -> AGENTS.md, GEMINI.md, .github/copilot-instructions.md,
+#                          CLAUDE.md          (scripts/sync-agent-entrypoints.mjs)
+#   .agents/skills/     -> .claude/skills/    (scripts/sync-agent-skills.mjs)
+#
+# Both generated trees exist only so each CLI's hardcoded loader path finds the
+# same rules. Hand-editing a generated file silently forks the instructions one
+# CLI reads from the ones every other CLI reads — which is the exact failure
+# this repo's agent-agnostic layout exists to prevent. This workflow fails the
+# build when that happens, or when someone edits a canonical source and forgets
+# to re-run the sync.
+#
+# Replaces the older check-skill-sync.yml (skills-only). One command, one gate:
+# `npm run sync:agents` regenerates everything, `npm run sync:agents:check`
+# verifies it.
+#
+# Full-repo check every run (not diff-scoped) — sync is either clean or it isn't.
+
+name: Check Agent Sync
+
+on:
+  pull_request:
+    paths:
+      - ".agents/**"
+      - ".claude/skills/**"
+      - "scripts/sync-agent-skills.mjs"
+      - "scripts/sync-agent-entrypoints.mjs"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "GEMINI.md"
+      - ".github/copilot-instructions.md"
+  push:
+    branches: [main]
+    paths:
+      - ".agents/**"
+      - ".claude/skills/**"
+      - "scripts/sync-agent-skills.mjs"
+      - "scripts/sync-agent-entrypoints.mjs"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "GEMINI.md"
+      - ".github/copilot-instructions.md"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify all generated agent files match their canonical sources
+        run: npm run sync:agents:check

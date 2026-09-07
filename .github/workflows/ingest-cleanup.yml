@@ -1,0 +1,161 @@
+name: Content Ingestion Cleanup
+
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      filename:
+        description: 'Filename to move from inbox to processed'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: read
+
+jobs:
+  move-processed-file:
+    name: Move File to Processed
+    # For issue-close triggers: only run when the closed issue has the 'ingestion' label.
+    # This prevents a runner from spinning up for every unrelated issue closure.
+    # Manual dispatch (workflow_dispatch) always proceeds.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.issue.labels.*.name, 'ingestion')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # SECURITY — the issue title is attacker-controlled text.
+      #
+      # `${{ github.event.issue.title }}` inside a `run:` block is substituted
+      # into the shell SOURCE before bash parses it, so a title of
+      #   [Ingest] x"; <any command>; #
+      # executes that command in a job holding `contents: write`. Pass it through
+      # `env:` instead: an environment variable is data to bash, never source.
+      #
+      # The same applies to `inputs.filename` on manual dispatch, and to every
+      # value derived from either — the taint follows the value into the paths
+      # built from it further down.
+      - name: Extract filename from issue (if triggered by issue close)
+        if: github.event_name == 'issues'
+        id: extract-filename
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          set -euo pipefail
+          # Title format: [Ingest] <filename>
+          filename="${ISSUE_TITLE#\[Ingest\] }"
+          printf 'filename=%s\n' "$filename" >> "$GITHUB_OUTPUT"
+
+      - name: Set filename (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        id: manual-filename
+        env:
+          INPUT_FILENAME: ${{ inputs.filename }}
+        run: |
+          set -euo pipefail
+          printf 'filename=%s\n' "$INPUT_FILENAME" >> "$GITHUB_OUTPUT"
+
+      - name: Determine filename
+        id: final-filename
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FROM_ISSUE: ${{ steps.extract-filename.outputs.filename }}
+          FROM_DISPATCH: ${{ steps.manual-filename.outputs.filename }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "issues" ]; then
+            filename="$FROM_ISSUE"
+          else
+            filename="$FROM_DISPATCH"
+          fi
+          printf 'filename=%s\n' "$filename" >> "$GITHUB_OUTPUT"
+
+      # This value becomes a filesystem path, so quoting is not sufficient on its
+      # own — reject anything that is not a plain filename before using it.
+      # Without this, a title of "[Ingest] ../../.github/workflows/claude.yml"
+      # would move a workflow file out of the repo's control on the next run.
+      - name: Validate filename
+        id: validate
+        env:
+          FILENAME: ${{ steps.final-filename.outputs.filename }}
+        run: |
+          set -euo pipefail
+          case "$FILENAME" in
+            ""|*/*|*..*|-*)
+              echo "::error::Refusing unsafe filename: '$FILENAME'."
+              echo "::error::Expected a bare filename from an issue titled '[Ingest] <file>'."
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$FILENAME" | grep -qE '^[A-Za-z0-9._-]+$'; then
+            echo "::error::Filename contains characters outside [A-Za-z0-9._-]: '$FILENAME'"
+            exit 1
+          fi
+          echo "validated filename: $FILENAME"
+
+      - name: Check if file exists in inbox
+        id: check-file
+        env:
+          FILENAME: ${{ steps.final-filename.outputs.filename }}
+        run: |
+          set -euo pipefail
+          source_file="intake/inbox/$FILENAME"
+          dest_file="intake/processed/$FILENAME"
+
+          if [ -f "$source_file" ]; then
+            printf 'exists=true\n' >> "$GITHUB_OUTPUT"
+            printf 'source_file=%s\n' "$source_file" >> "$GITHUB_OUTPUT"
+            printf 'dest_file=%s\n' "$dest_file" >> "$GITHUB_OUTPUT"
+          else
+            printf 'exists=false\n' >> "$GITHUB_OUTPUT"
+            echo "File not found: $source_file"
+          fi
+
+      - name: Move file to processed
+        if: steps.check-file.outputs.exists == 'true'
+        env:
+          SOURCE_FILE: ${{ steps.check-file.outputs.source_file }}
+          DEST_FILE: ${{ steps.check-file.outputs.dest_file }}
+        run: |
+          set -euo pipefail
+          git mv "$SOURCE_FILE" "$DEST_FILE"
+          echo "Moved $SOURCE_FILE -> $DEST_FILE"
+
+      - name: Commit changes
+        if: steps.check-file.outputs.exists == 'true'
+        env:
+          FILENAME: ${{ steps.final-filename.outputs.filename }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          if [ "$EVENT_NAME" = "issues" ]; then
+            commit_msg="Ingest: ${FILENAME} processed
+
+          Issue: #${ISSUE_NUMBER}
+          Moved to intake/processed/ for the audit trail."
+          else
+            commit_msg="Ingest: ${FILENAME} processed
+
+          Manual cleanup. Moved to intake/processed/ for the audit trail."
+          fi
+
+          git commit -m "$commit_msg"
+          git push
+
+      - name: File not found notification
+        if: steps.check-file.outputs.exists == 'false'
+        env:
+          FILENAME: ${{ steps.final-filename.outputs.filename }}
+        run: |
+          echo "File not found in intake/inbox/: $FILENAME"
+          echo "It may have already been moved, or was never in the inbox."
+          echo "See TROUBLESHOOTING.md — a failed inbox -> processed move looks"
+          echo "identical to content that was never ingested."

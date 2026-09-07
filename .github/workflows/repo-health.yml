@@ -1,0 +1,117 @@
+# Repo Health Sweep
+#
+# Weekly hygiene sweep the automated pipelines don't self-report on:
+#   1. intake/inbox/ files that landed but were never picked up (>7 days
+#      since first added to git — the ingest pipeline only reacts to NEW
+#      pushes, so a broken @claude response leaves stragglers invisible).
+#   2. Open GitHub issues labeled `ingestion` that are >14 days old (the
+#      @claude -> PR -> auto-merge chain likely broke silently).
+#   3. Open PRs >30 days old — abandoned/competing feature branches and
+#      unmerged Dependabot PRs alike.
+#   4. Root-level files/directories that look like accidental junk,
+#      detected structurally rather than via a fixed filename blocklist.
+#
+# See scripts/repo-health-scan.js for the scan/report logic — read-only,
+# batch-into-one-issue posture.
+#
+# Scheduled for Wednesday 8 AM UTC. If you add other scheduled jobs, keep
+# them on different days so each report stays distinguishable.
+#
+# Uses the default GITHUB_TOKEN, not the GH_PERSONAL_TOKEN PAT: this
+# workflow only reads issues/PRs/files and opens or comments on a single
+# tracking issue, it never pushes a commit to main, so it isn't exposed to
+# the "PAT expired silently" failure mode documented in TROUBLESHOOTING.md
+# for the ingestion pipeline.
+
+name: Repo Health Sweep
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '0 8 * * 3' # Wednesday 8 AM UTC
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — needed for `git log --diff-filter=A` first-added dates
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Ensure repo-health label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh label create "repo-health" \
+            --color "0E8A16" \
+            --description "Weekly repo hygiene sweep (inbox stragglers, stale issues/PRs, root junk)" \
+            --force
+
+      - name: Run repo health scan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/repo-health-scan.js --issue-body > /tmp/repo-health-body.md
+          node scripts/repo-health-scan.js --full-report > /tmp/repo-health-full-report.md
+          cat /tmp/repo-health-full-report.md >> "$GITHUB_STEP_SUMMARY"
+
+          echo "--- issue body preview ---"
+          cat /tmp/repo-health-body.md
+
+      - name: Upload full findings as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-health-full-report
+          path: /tmp/repo-health-full-report.md
+          retention-days: 90
+
+      - name: Create or update repo-health issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Batch findings into ONE issue, not one per entry, and not one
+          # per week. If a repo-health issue from a previous run is still
+          # open, don't pile up a new one — post an updated snapshot as a
+          # comment on the existing issue instead, so the backlog
+          # conversation stays in one place until a human closes it out.
+          existing_issue=$(gh issue list \
+            --label "repo-health" \
+            --state open \
+            --limit 1 \
+            --json number \
+            --jq '.[0].number' 2>/dev/null || echo "")
+
+          # jq prints the literal string "null" (not empty output) when the
+          # result array is empty, so check for that explicitly alongside
+          # the empty-string case.
+          if [ -n "$existing_issue" ] && [ "$existing_issue" != "null" ]; then
+            echo "Open repo-health issue #$existing_issue already exists — posting updated snapshot as a comment."
+            {
+              echo "## Weekly re-scan — $(date -u +%Y-%m-%d)"
+              echo ""
+              cat /tmp/repo-health-body.md
+            } > /tmp/repo-health-comment.md
+            gh issue comment "$existing_issue" --body-file /tmp/repo-health-comment.md
+          else
+            echo "No open repo-health issue — creating one."
+            gh issue create \
+              --title "Repo health sweep: $(date -u +%Y-%m-%d)" \
+              --label "repo-health" \
+              --body-file /tmp/repo-health-body.md
+          fi

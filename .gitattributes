@@ -1,0 +1,29 @@
+# Pin everything the sync scripts touch to LF on all platforms.
+#
+# scripts/sync-agent-entrypoints.mjs assembles its banner in JS (LF) and appends
+# the source file's content. On a Windows checkout with core.autocrlf=true the
+# working copy becomes CRLF, the regenerated file no longer matches byte for
+# byte, and `npm run sync:agents:check` reports drift that does not exist —
+# failing CI on a repo nobody has touched.
+#
+# Shell scripts are pinned for a different reason: a CRLF .sh fails on a Linux
+# runner with the notoriously unhelpful "bad interpreter: No such file or
+# directory".
+
+# Canonical instruction sources and everything generated from them
+.agents/**                      text eol=lf
+.claude/skills/**               text eol=lf
+AGENTS.md                       text eol=lf
+CLAUDE.md                       text eol=lf
+GEMINI.md                       text eol=lf
+.github/copilot-instructions.md text eol=lf
+
+# Executed as code
+scripts/*.mjs                   text eol=lf
+scripts/*.js                    text eol=lf
+scripts/*.sh                    text eol=lf
+.github/workflows/*.yml         text eol=lf
+
+# Config read by tooling
+_system/*.yml                   text eol=lf
+*.json                          text eol=lf
