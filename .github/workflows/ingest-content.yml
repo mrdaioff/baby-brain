@@ -2,10 +2,15 @@
 
 name: Ingest Content
 
+# Path-filtered on purpose. Without the filter this ran on every push, and on a
+# fresh copy with no GH_PERSONAL_TOKEN yet, the guard below turned every commit
+# red before the user had touched the inbox. Now it only runs when content lands.
 on:
   push:
     branches:
       - main
+    paths:
+      - "intake/inbox/**"
 
 jobs:
   ingest:
