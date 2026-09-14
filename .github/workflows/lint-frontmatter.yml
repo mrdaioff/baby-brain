@@ -2,9 +2,10 @@
 #
 # CI gate for knowledge_base/**/*.md frontmatter: fails the PR/push if a file
 # CHANGED in this diff has a `status` or `domain` outside
-# _system/knowledge_graph/taxonomy.yaml, or is missing a required frontmatter
-# field. See scripts/lint-frontmatter.mjs for the validation logic and full
-# rationale.
+# _system/knowledge_graph/taxonomy.yaml, is missing a required frontmatter
+# field, or carries a `[[wiki-link]]` that resolves to no .md file under the
+# content roots. See scripts/lint-frontmatter.mjs for the validation logic and
+# full rationale.
 #
 # Deliberately scoped to changed files only, not a full-repo scan. A taxonomy
 # change re-flags every pre-existing file that predates it, which turns one

@@ -76,7 +76,7 @@ The clause is the point. A bare list of links records that two things are near e
 3. Create the file at `knowledge_base/<domain>/YYYY-MM-DD_Concept_Name.md`.
 4. Link it from wherever it came from, and link at least two related concepts from it.
 
-**A link to a concept that does not exist yet is fine.** It marks something worth writing rather than an error. What is not fine is a link to something you meant to write and never did, left for a year — see maintenance below.
+**A link must resolve to a file.** `scripts/lint-frontmatter.mjs` rejects a changed `knowledge_base/` file that carries a `[[wiki-link]]` matching no `.md` file under the content roots (`knowledge_base/`, `brand/`, `projects/`, `services/`, `library/`), and at Tier 1 that runs in CI. A target resolves if it matches, case-insensitively and with `_`/`-` folded together, a file's repo-relative path without `.md`, its bare filename, or its filename without the leading `YYYY-MM-DD_`. If the concept you want to link does not exist yet, create it in the same change — or mention it in plain prose without the brackets. Dangling links left "for later" are how a graph ends up with a sixth of its edges cut before anyone notices.
 
 ## Linking to sources
 

@@ -133,6 +133,61 @@ function lintFile(relPath) {
   return { file: relPath, errors };
 }
 
+// --- Wiki-link resolution ---------------------------------------------------
+//
+// A `[[wiki-link]]` that points at nothing is an edge cut out of the knowledge
+// graph, and they accumulate silently: an audit of a mature repo of this shape
+// found roughly a sixth of all links in knowledge_base/ dangling, which makes
+// "the graph" a graph missing a sixth of its edges. Same scoping rule as the
+// frontmatter check: only files changed in this PR/push are judged, so an
+// existing backlog is not blocked, but no new dangling link can land.
+// `.agents/conventions/wiki_links.md` is the link convention.
+//
+// A target resolves if it matches, case-insensitively and with `_`/`-` folded
+// together, any markdown file's repo-relative path (without `.md`), its bare
+// filename, or its filename with the leading `YYYY-MM-DD_` stripped.
+//
+// If you renamed any of these directories at install time, rename them here
+// too — the install skill greps scripts/ for exactly this reason.
+const LINK_ROOTS = ["knowledge_base", "brand", "projects", "services", "library"];
+
+function normalizeLinkKey(s) {
+  return s.trim().toLowerCase().replace(/\.md$/, "").replace(/\\/g, "/").replace(/_/g, "-").replace(/\s+/g, "-");
+}
+
+function buildLinkIndex() {
+  const keys = new Set();
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs);
+      } else if (entry.name.endsWith(".md")) {
+        const rel = path.relative(REPO_ROOT, abs).replace(/\\/g, "/").replace(/\.md$/, "");
+        const base = path.basename(rel);
+        keys.add(normalizeLinkKey(rel));
+        keys.add(normalizeLinkKey(base));
+        keys.add(normalizeLinkKey(base.replace(/^\d{4}-\d{2}-\d{2}_/, "")));
+      }
+    }
+  };
+  for (const root of LINK_ROOTS) {
+    const abs = path.join(REPO_ROOT, root);
+    if (fs.existsSync(abs)) walk(abs);
+  }
+  return keys;
+}
+
+function findDanglingLinks(raw, index) {
+  const dangling = new Set();
+  for (const match of raw.matchAll(/\[\[([^\]]+?)\]\]/g)) {
+    const target = match[1].split("|")[0].split("#")[0];
+    if (!target.trim()) continue;
+    if (!index.has(normalizeLinkKey(target))) dangling.add(target.trim());
+  }
+  return [...dangling];
+}
+
 function main() {
   const taxonomy = loadTaxonomy();
   const validDomains = new Set(taxonomy.domains?.knowledge_base ?? []);
@@ -154,6 +209,7 @@ function main() {
   }
 
   const results = [];
+  const linkIndex = buildLinkIndex();
 
   for (const relPath of files) {
     const result = lintFile(relPath);
@@ -162,6 +218,13 @@ function main() {
     const absPath = path.join(REPO_ROOT, relPath);
     const raw = fs.readFileSync(absPath, "utf8");
     const { data: fm } = matter(raw);
+
+    for (const target of findDanglingLinks(raw, linkIndex)) {
+      result.errors.push(
+        `dangling wiki-link \`[[${target}]]\` — no .md file under ${LINK_ROOTS.join("/")} matches it; ` +
+          "create the target, link to an existing entry, or drop the brackets"
+      );
+    }
 
     // Only run the status/domain value checks if the fields are actually
     // present — a missing field is already reported above, no need to

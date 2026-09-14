@@ -148,7 +148,25 @@ jobs:
           fi
 
           git commit -m "$commit_msg"
-          git push
+
+          # main moves constantly (auto-merge, the router, other cleanup runs),
+          # so a plain push regularly loses the race with
+          # "! [rejected] main -> main (fetch first)" and leaves an
+          # already-ingested file stranded in inbox/ next to a closed issue —
+          # which reads as "never ingested" unless you check the issue. The
+          # move commit touches only intake/, so rebasing onto whatever landed
+          # meanwhile is always clean; retry a few times before giving up.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt) — rebasing onto origin/main and retrying."
+            git fetch --quiet origin main
+            git rebase --quiet origin/main
+            sleep $((attempt * 3))
+          done
+          echo "::error::Could not push after 5 attempts."
+          exit 1
 
       - name: File not found notification
         if: steps.check-file.outputs.exists == 'false'

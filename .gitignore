@@ -17,6 +17,13 @@ coverage/
 .trigger/
 .vercel/
 
+# Page snapshots written by a browser-automation MCP server and scrape caches
+# left by web-scraping tools. Session scratch, not repo content — dozens of
+# these accumulate at the repo root in a few days of agent sessions. Anything
+# worth keeping from a scrape belongs in the relevant projects/<slug>/.
+.playwright-mcp/
+.firecrawl/
+
 # Dedup logs are intentionally committed — re-include after the *.log rule above.
 # The whole point is that they survive across runs and machines.
 !.github/logs/*.log

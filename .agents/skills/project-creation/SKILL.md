@@ -22,7 +22,8 @@ Your guiding principle: a project isn't real until it shows up in all three plac
 
 | # | File | Purpose | Template source |
 |---|---|---|---|
-| 1 | `projects/<slug>/context.md` | Living intelligence: Current State (rewritten each update) / Key Decisions (append-only, dated) / Open Questions / Notes & Nodes (append-only, dated) | `.agents/templates/project/context.md` |
+| 1 | `projects/<slug>/context.md` | Snapshot a session reads on day one, under 400 lines: Current State (rewritten each update) / Key Decisions (one dated line each) / undated reference sections / Open Questions / Notes & Nodes. **No dated narrative** — that goes in the log below. | `.agents/templates/project/context.md` |
+| 1b | `projects/<slug>/log/YYYY-MM.md` | Dated entries, one file per month, append-only: build-log entries, call summaries, post-mortems, decision reasoning. Frontmatter `type: project-log`, `project`, `month`; entries as `## YYYY-MM-DD — title`. Create the current month's file with the project; the router appends to it. | `.agents/templates/project/log.md` |
 | 2 | `projects/<slug>/README.md` | Status, Client, Started, Goal, Key Files, Stakeholders table, Current State snapshot | `.agents/templates/project/README.md` |
 | 3 | `projects/<slug>/calls.md` | Auto-updated call log table (date / title / artifact link / transcript link). Seed manually with any calls found in step 3 above, and note the file was seeded manually if it predates the registry entry | `.agents/templates/project/calls.md` |
 | 4 | `projects/<slug>/open-items.md` | Commitment tracker: who owes what, due date, status. The project router appends to this automatically from each call artifact's "Commitments & Open Items" section, so the file must exist (or the router will create it) for commitments to land anywhere. Seed with any commitments found in the prior calls from step 3 | `.agents/templates/project/open-items.md` |
@@ -37,6 +38,10 @@ files.** Three of them have a machine contract, not merely a convention:
 - `context.md` — the project router locates **Current State**, **Key Decisions**,
   **Open Questions** and **Notes & Nodes** by heading name when it writes a
   matched call into the project.
+- `log/YYYY-MM.md` — the router appends a `## YYYY-MM-DD — title` section for
+  each matched call and creates the month's file from the template if it is
+  missing. The health scan flags any `context.md` over 400 lines, which is
+  what happens when dated entries get stacked in it instead of here.
 - `open-items.md` — the router appends to the `## Open Items` table, and
   `scripts/rollup-open-items.mjs` reads that table and stops at `## Closed`.
   Rename a heading or reorder a column and this project silently vanishes from

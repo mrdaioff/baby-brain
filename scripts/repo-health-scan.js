@@ -3,7 +3,7 @@
 /**
  * repo-health-scan.js
  *
- * Weekly repo-hygiene sweep covering four categories the automated
+ * Weekly repo-hygiene sweep covering seven categories the automated
  * pipelines don't self-report on:
  *
  *   1. intake/inbox/ stragglers — files that landed in the inbox but were
@@ -36,6 +36,19 @@
  *      not a blocklist of specific filenames, so it also catches future
  *      junk with different names. See classifyRootEntry() for the rules.
  *
+ *   5. Stranded automation branches — `claude/issue-*` branches ahead of
+ *      main with no PR in any state: finished work nothing will ever merge.
+ *
+ *   6. Stuck automation PRs — open `claude/issue-*` PRs that GitHub reports
+ *      as CONFLICTING, or that are older than a couple of days. Auto-merge
+ *      should land these within minutes, so age or a conflict means the
+ *      merge failed and the linked issue will never close on its own.
+ *
+ *   7. Oversized project context files — any projects/<slug>/context.md over
+ *      CONTEXT_MAX_LINES. That file is the snapshot a session reads first;
+ *      past the limit it has almost always turned into a dated history that
+ *      belongs in projects/<slug>/log/YYYY-MM.md.
+ *
  * This is a read-only reporting tool.
  * It never deletes, moves, or auto-closes anything. It shells out to the
  * `gh` CLI for issue/PR data (rather than hitting the GitHub API directly via
@@ -62,6 +75,11 @@ const INBOX_DIR = path.join(REPO_ROOT, "intake", "inbox");
 const INBOX_STALE_DAYS = 7;
 const ISSUE_STALE_DAYS = 14; // see doc block above for reasoning
 const PR_STALE_DAYS = 30;
+// Automation PRs should merge within minutes; two days is already a failure.
+const AUTOMATION_PR_STALE_DAYS = 2;
+// projects/<slug>/context.md is a snapshot, not a history. Past this it has
+// almost always accumulated dated entries that belong in the monthly log.
+const CONTEXT_MAX_LINES = 400;
 const SAMPLE_SIZE = 25;
 // A branch is only "stranded" once the run that pushed it has had time to open
 // its PR. Two hours is far longer than any observed run and keeps an in-flight
@@ -255,6 +273,66 @@ function scanStalePRs(today) {
   return { count: items.length, thresholdDays: PR_STALE_DAYS, items };
 }
 
+// --- 6. Stuck automation PRs ------------------------------------------------
+//
+// Bucket 3's 30-day threshold is tuned for human PRs. An automation PR
+// (ingest or router, head `claude/issue-*`) is a different animal: auto-merge
+// is supposed to land it within minutes, so one that is still open after a
+// couple of days — or that GitHub already reports as CONFLICTING — means the
+// merge failed and the work is stranded with its issue open. The classic
+// cause is several bot PRs opened minutes apart, all editing the same
+// projects/<slug>/*.md aggregates, while bucket 3 says "None — clean".
+// auto-merge.yml union-merges those files before merging; this bucket is the
+// alarm for whenever that stops being enough.
+function scanStuckAutomationPRs(today) {
+  const { data, error } = ghJson([
+    "pr", "list",
+    "--state", "open",
+    "--limit", "200",
+    "--json", "number,title,url,createdAt,headRefName,mergeable",
+  ]);
+  if (error) return { count: 0, thresholdDays: AUTOMATION_PR_STALE_DAYS, items: [], error };
+
+  const items = (data || [])
+    .filter((pr) => pr.headRefName && pr.headRefName.startsWith(CLAUDE_BRANCH_PREFIX))
+    .map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      branch: pr.headRefName,
+      createdAt: pr.createdAt,
+      daysOld: daysAgo(pr.createdAt, today),
+      mergeable: pr.mergeable || "UNKNOWN",
+    }))
+    .filter((pr) => pr.mergeable === "CONFLICTING" || pr.daysOld > AUTOMATION_PR_STALE_DAYS)
+    .sort((a, b) => b.daysOld - a.daysOld);
+
+  return { count: items.length, thresholdDays: AUTOMATION_PR_STALE_DAYS, items };
+}
+
+// --- 7. Oversized project context files ------------------------------------
+//
+// projects/<slug>/context.md is the snapshot a session reads on day one; dated
+// narrative belongs in projects/<slug>/log/YYYY-MM.md. Left unchecked, a busy
+// project's context.md grows into thousands of lines of dated entries stacked
+// under "Current State", and every session pays to read the whole history to
+// learn what is true today. This lists any file over CONTEXT_MAX_LINES with
+// the fix. Applies at every tier — nothing here depends on the pipeline.
+function scanOversizedContext() {
+  const projectsDir = path.join(REPO_ROOT, "projects");
+  if (!fs.existsSync(projectsDir)) return { count: 0, maxLines: CONTEXT_MAX_LINES, items: [] };
+  const items = [];
+  for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(projectsDir, entry.name, "context.md");
+    if (!fs.existsSync(file)) continue;
+    const lines = fs.readFileSync(file, "utf8").split("\n").length;
+    if (lines > CONTEXT_MAX_LINES) items.push({ slug: entry.name, file: `projects/${entry.name}/context.md`, lines });
+  }
+  items.sort((a, b) => b.lines - a.lines);
+  return { count: items.length, maxLines: CONTEXT_MAX_LINES, items };
+}
+
 // --- 5. Stranded Claude branches --------------------------------------------
 //
 // The failure this exists to catch: on 2026-09-02, PR #2170 replaced the
@@ -270,11 +348,16 @@ function scanStalePRs(today) {
 // ahead_by > 0 forever. So "ahead of main" alone means nothing — the load-
 // bearing condition is the absence of a PR in ANY state.
 function scanStrandedBranches(today) {
-  const { data: prData, error: prError } = ghJson([
-    "pr", "list", "--state", "all", "--limit", "500", "--json", "headRefName",
+  // REST, paginated — not `gh pr list --limit 500`. That single GraphQL query
+  // starts failing with "Something went wrong while executing your query" once
+  // a repo has several hundred branches and a couple of thousand PRs, which
+  // turns this whole bucket into an error line. The REST endpoint pages at 100
+  // and never times out.
+  const { data: prRefs, error: prError } = ghLines([
+    "api", "repos/{owner}/{repo}/pulls?state=all&per_page=100", "--paginate", "--jq", ".[].head.ref",
   ]);
   if (prError) return { count: 0, items: [], error: prError };
-  const withPR = new Set((prData || []).map((pr) => pr.headRefName));
+  const withPR = new Set(prRefs || []);
 
   // Keep the jq filter page-safe: `--paginate --jq` applies the filter once per
   // page, so a filter that can emit "null" for a page without matches pollutes
@@ -452,7 +535,7 @@ function scanRootJunk() {
 
 // --- Install tier --------------------------------------------------------
 
-// Four of the five buckets below only make sense once the hosted ingestion
+// Five of the seven buckets below only make sense once the hosted ingestion
 // pipeline exists. On a Tier 0 repo that pipeline was deliberately removed, so
 // running them reports failures for automation nobody installed — and an owner
 // who sees a red health scan every week stops reading it at all.
@@ -493,6 +576,11 @@ function scan() {
     strandedBranches: automated
       ? scanStrandedBranches(today)
       : { count: 0, items: [], skipped: true },
+    stuckAutomationPRs: automated
+      ? scanStuckAutomationPRs(today)
+      : { count: 0, thresholdDays: AUTOMATION_PR_STALE_DAYS, items: [], skipped: true },
+    // A bloated context.md hurts every session that reads it, pipeline or not.
+    oversizedContext: scanOversizedContext(),
   };
 }
 
@@ -505,14 +593,14 @@ function table(rows, headers) {
 }
 
 function renderIssueBody(result) {
-  const { inboxStragglers, staleIngestionIssues, stalePRs, rootJunk, strandedBranches, generatedAt, tier } = result;
+  const { inboxStragglers, staleIngestionIssues, stalePRs, rootJunk, strandedBranches, stuckAutomationPRs, oversizedContext, generatedAt, tier } = result;
   const lines = [];
 
   lines.push(`_Generated ${generatedAt} by \`scripts/repo-health-scan.js\`._`);
   lines.push("");
   lines.push(
     tier >= 1
-      ? `**Install tier: ${tier}.** All five buckets apply.`
+      ? `**Install tier: ${tier}.** All seven buckets apply.`
       : "**Install tier: 0.** The hosted ingestion pipeline is not installed, so the "
         + "issue, PR, and branch buckets below are skipped rather than run against "
         + "automation that is not there. Set `tier:` in `_system/install.yml` if this is wrong."
@@ -529,6 +617,8 @@ function renderIssueBody(result) {
       [`Stale open PRs (>${stalePRs.thresholdDays}d)`, stalePRs.error ? "error" : String(stalePRs.count)],
       ["Root-level junk candidates", String(rootJunk.count)],
       ["Stranded `claude/issue-*` branches (work pushed, no PR)", strandedBranches.error ? "error" : String(strandedBranches.count)],
+      [`Stuck automation PRs (CONFLICTING, or open >${stuckAutomationPRs.thresholdDays}d)`, stuckAutomationPRs.error ? "error" : String(stuckAutomationPRs.count)],
+      [`Project \`context.md\` files over ${oversizedContext.maxLines} lines`, String(oversizedContext.count)],
     ],
     ["Category", "Count"]
   ));
@@ -631,7 +721,35 @@ function renderIssueBody(result) {
       lines.push(`- [ ] \`${item.branch}\`${issueTag} — ${item.commitsAhead} commit(s) ahead, last ${item.lastCommit}${item.daysOld !== null ? ` (${item.daysOld}d ago)` : ""}`);
     }
     lines.push("");
-    lines.push("**If several appear at once, suspect the workflow, not the runs.** Check that `.github/workflows/claude.yml` still has its auto-create-PR step — re-running the GitHub App setup overwrites that file with a stock template that has none (PR #2170).");
+    lines.push("**If several appear at once, suspect the workflow, not the runs.** Check that `.github/workflows/claude.yml` still has its auto-create-PR step — re-running the GitHub App setup overwrites that file with a stock template that has none.");
+  }
+  lines.push("");
+  lines.push("## 6. Stuck automation PRs");
+  lines.push("");
+  lines.push(`Open \`claude/issue-*\` PRs that GitHub reports as CONFLICTING, or that have been open more than ${stuckAutomationPRs.thresholdDays} days. Auto-merge should land these within minutes of opening, so anything here means the merge failed and the linked issue will never close on its own. The usual cause is two automation PRs editing the same \`projects/<slug>/\` aggregate files; \`auto-merge.yml\` union-merges those before merging, so a hit here means either that step is broken or the conflict is in a file it refuses to auto-resolve.`);
+  lines.push("");
+  if (stuckAutomationPRs.error) {
+    lines.push("_Could not fetch PRs via `gh`: " + stuckAutomationPRs.error + "_");
+  } else if (stuckAutomationPRs.count === 0) {
+    lines.push("None — clean.");
+  } else {
+    for (const item of stuckAutomationPRs.items.slice(0, SAMPLE_SIZE)) {
+      lines.push(`- [ ] #${item.number} [${item.title}](${item.url}) — ${item.mergeable}, open ${item.daysOld}d (\`${item.branch}\`)`);
+    }
+    lines.push("");
+    lines.push("**Fix:** merge `main` into the branch (union-merge `projects/**/*.md`, regenerate `projects/OPEN-ITEMS.md` with `node scripts/rollup-open-items.mjs`), push, and let auto-merge retry — or squash-merge by hand and close the linked issue.");
+  }
+  lines.push("");
+  lines.push("## 7. Oversized project `context.md` files");
+  lines.push("");
+  lines.push(`\`projects/<slug>/context.md\` is the snapshot a session reads first; it stays under ${oversizedContext.maxLines} lines. Dated narrative belongs in \`projects/<slug>/log/YYYY-MM.md\` (one file per month, append-only). A file listed here has dated entries stacked inside it again — move them to the matching month's log and keep Current State a snapshot.`);
+  lines.push("");
+  if (oversizedContext.count === 0) {
+    lines.push("None — clean.");
+  } else {
+    for (const item of oversizedContext.items) {
+      lines.push(`- [ ] \`${item.file}\` — ${item.lines} lines`);
+    }
   }
   lines.push("");
   lines.push("---");
@@ -641,13 +759,15 @@ function renderIssueBody(result) {
   lines.push("- [ ] For stale PRs: decide merge, close, or rebase per PR — especially competing PRs for the same feature");
   lines.push("- [ ] For root junk: verify each flagged item by hand before deleting (this scan does not delete anything)");
   lines.push("- [ ] For stranded branches: open the missing PR, then check whether `claude.yml` lost its auto-create-PR step");
-  lines.push("- [ ] Close this issue once all five buckets are empty (or acceptably small) for this cycle");
+  lines.push("- [ ] For stuck automation PRs: sync the branch with `main` and let auto-merge retry, or merge by hand and close the linked issue");
+  lines.push("- [ ] For oversized `context.md` files: move dated entries to `projects/<slug>/log/YYYY-MM.md`, keep Current State a snapshot");
+  lines.push("- [ ] Close this issue once all seven buckets are empty (or acceptably small) for this cycle");
 
   return lines.join("\n");
 }
 
 function renderFullReport(result) {
-  const { inboxStragglers, staleIngestionIssues, stalePRs, rootJunk, strandedBranches, generatedAt, tier } = result;
+  const { inboxStragglers, staleIngestionIssues, stalePRs, rootJunk, strandedBranches, stuckAutomationPRs, oversizedContext, generatedAt, tier } = result;
   const lines = [];
   lines.push(`# Repo Health — Full Report (${generatedAt}) — install tier ${tier}`);
   lines.push("");
@@ -679,6 +799,29 @@ function renderFullReport(result) {
   lines.push("");
   for (const item of rootJunk.items) {
     lines.push(`- ${item.name} (${item.type}) — ${item.reasons.join("; ")}`);
+  }
+  lines.push("");
+
+  lines.push(`## Stranded branches (${strandedBranches.count})`);
+  lines.push("");
+  if (strandedBranches.error) lines.push(`Error: ${strandedBranches.error}`);
+  for (const item of strandedBranches.items) {
+    lines.push(`- ${item.branch} — ${item.commitsAhead} commit(s) ahead, last ${item.lastCommit}`);
+  }
+  lines.push("");
+
+  lines.push(`## Stuck automation PRs (${stuckAutomationPRs.count})`);
+  lines.push("");
+  if (stuckAutomationPRs.error) lines.push(`Error: ${stuckAutomationPRs.error}`);
+  for (const item of stuckAutomationPRs.items) {
+    lines.push(`- #${item.number} ${item.title} — ${item.url} — ${item.mergeable}, ${item.daysOld}d old`);
+  }
+  lines.push("");
+
+  lines.push(`## Oversized context.md files (${oversizedContext.count})`);
+  lines.push("");
+  for (const item of oversizedContext.items) {
+    lines.push(`- ${item.file} — ${item.lines} lines (limit ${oversizedContext.maxLines})`);
   }
 
   return lines.join("\n");
