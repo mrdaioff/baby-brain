@@ -30,10 +30,12 @@ This file ships generic. It becomes valuable when you replace these with your ow
 
 **Update the relevant `context.md` after any meaningful session, without being asked.** Meaningful means a build, a decision, a bug fixed, a validation passed, an open item resolved.
 
-- After a build → update Current State, add a dated log entry
-- After a decision → append to Key Decisions, dated
+- After a build → rewrite Current State if what is true changed, and append a dated entry to `projects/<slug>/log/YYYY-MM.md`
+- After a decision → one dated line in Key Decisions, the reasoning in the log entry
 - After validating something → close the open item
 - Commit and push immediately
+
+**Dated narrative goes in `projects/<slug>/log/YYYY-MM.md`, never in `context.md`.** `context.md` is the snapshot a session reads on day one: Current State, Key Decisions as one-liners, undated reference sections, Open Questions, Notes & Nodes. It stays under 400 lines; the health sweep flags it past that. Everything dated — build-log entries, "on such-and-such date we…" paragraphs, post-mortems — lives in the monthly log, one file per month, append-only. The incident behind this: a long-running project's `context.md` grew past 2,500 lines, half of them dated entries stacked under "Current State", so every session on that project paid to read two years of history to learn what was true today — and the ingestion and router bots kept colliding on that one file. The router prompt writes to the log for this reason.
 
 **When something important surfaces in conversation and is not written down, write it down and say so in chat.** Route it: repo-wide rules to `.agents/agent.md`, how-to-work rules here, tool knowledge to `.agents/tooling.md`, project state to that project's `context.md`. If the target file does not exist, create it — do not skip the update because the file is missing.
 

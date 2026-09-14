@@ -14,6 +14,7 @@ spreadsheet). If the two disagree, this wins, and the other one gets updated.
 projects/
   <slug>/
     context.md      — the living record. Read before working, write after.
+    log/YYYY-MM.md  — dated entries, one file per month, append-only
     README.md       — goal, stakeholders, current state at a glance
     calls.md        — call log, linked to brand/artifacts/
     open-items.md   — commitment tracker: who owes what, by when
@@ -23,12 +24,19 @@ projects/
 `context.md` is the important one. It has four sections:
 
 - **Current State** — rewritten each update, never appended to
-- **Key Decisions** — append-only, dated
+- **Key Decisions** — append-only, one dated line each
 - **Open Questions** — what is unresolved
 - **Notes & Nodes** — append-only, dated
 
 The append-only sections are append-only on purpose. A decision log you can
 rewrite is a decision log you cannot trust six months later.
+
+`context.md` is a snapshot, not a history. It stays under 400 lines (the health
+scan flags it past that) and never carries a dated paragraph. Everything dated —
+build-log entries, call summaries, post-mortems, the reasoning behind a decision —
+goes in `log/YYYY-MM.md`, one file per month, append-only, with entries headed
+`## YYYY-MM-DD — title`. A session reads `context.md` to learn what is true
+today; it reads the log only when it needs to know how things got that way.
 
 ## Active projects
 

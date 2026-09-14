@@ -36,6 +36,7 @@ _Client-side names are what the router matches on. Get them into
 | File | What it is |
 |---|---|
 | [context.md](context.md) | Living record — read before working |
+| [log/](log/) | Dated entries, one file per month |
 | [calls.md](calls.md) | Call log |
 | [open-items.md](open-items.md) | Commitments and who owes what |
 

@@ -114,6 +114,54 @@ Then two repo settings, not code:
   review makes these PRs permanently unmergeable. Either exempt the workflow or
   drop the requirement on `main`.
 
+### The PR exists, the work is done, and it still cannot merge
+
+Every automation PR — ingestion *and* router — rewrites the same aggregate
+files: `projects/<slug>/context.md`, `calls.md`, `open-items.md`, and the
+generated `projects/OPEN-ITEMS.md`. Two bot PRs opened minutes apart therefore
+conflict the moment the first one merges. `auto-merge.yml` fails with
+`Pull Request has merge conflicts`, and the PR sits open with its issue open
+and its source file still in `intake/inbox/`. The stale-PR sweep does not
+catch it, because that bucket looks at age (30 days), not mergeability.
+
+**`mergeable: CONFLICTING` on a `claude/issue-*` PR is the signature.**
+`gh pr view <n> --json mergeable` shows it.
+
+Two things handle this. `auto-merge.yml` checks the branch out, merges `main`
+into it with a runner-local *union* merge driver for `projects/**/*.md` (both
+sides kept — they are append-style logs), regenerates `projects/OPEN-ITEMS.md`
+with `scripts/rollup-open-items.mjs` instead of resolving it, pushes with the
+default `GITHUB_TOKEN` (no `synchronize` event, so no extra run), and retries
+the squash merge up to three times. And the health scan's "stuck automation
+PRs" bucket flags any `claude/issue-*` PR that is CONFLICTING or older than
+two days.
+
+If that bucket fires anyway, the conflict is in a file the union driver
+refuses — anything outside `projects/` — and someone has to resolve it by
+hand: merge `main` into the branch, fix the file, push, and let auto-merge
+retry.
+
+### Cleanup pushes race with everything else committing to `main`
+
+`ingest-cleanup.yml` moves the source file from `inbox/` to `processed/` and
+pushes. `main` moves constantly — auto-merge, the router, other cleanup runs —
+so a plain push loses that race with `! [rejected] main -> main (fetch first)`
+and leaves an already-ingested file sitting in `intake/inbox/` next to a
+*closed* issue. That reads as "never ingested" unless you check the issue.
+
+The push now rebases onto `origin/main` and retries five times. If a file is
+still in `inbox/` with a closed `[Ingest]` issue, it only needs moving to
+`intake/processed/`; the content is already on `main` under whatever title the
+librarian gave it.
+
+### Branches pile up
+
+Every automation run leaves a `claude/issue-*` branch behind after its PR
+merges. Turn on **Settings → General → Pull Requests → Automatically delete
+head branches** and GitHub removes them on merge. Nothing here depends on the
+branch surviving; the health scan's stranded-branch check looks for branches
+with *no* PR, which a deleted merged branch is not.
+
 ## A file was ingested but you cannot find it
 
 The librarian **retitles files during ingestion**. Searching for the source

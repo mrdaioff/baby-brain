@@ -213,15 +213,39 @@ ${CANDIDATE_LINES}
    | ${DATE} | ${TITLE} | [artifact](../../${ARTIFACT_PATH}) | [transcript](../../${TRANSCRIPT_PATH}) |
    \`\`\`
 
-   **b) Update \`projects/{slug}/context.md\`:**
-   - Read the existing context.md
-   - Rewrite the **Current State** section to reflect any meaningful changes surfaced in this call
-   - Append to **Notes & Nodes** (only if the call contains project-relevant insights, decisions, or updates — skip if the call is purely operational with nothing new):
-     \`- **${DATE}** — [1-2 sentence summary of the key insight or update]\`
-   - If a clear new decision was made, append to **Key Decisions**:
-     \`- **${DATE}** — [decision]\`
-   - If a new open question surfaced, add it to **Open Questions**
-   - Do NOT rewrite Key Decisions, Open Questions, or Notes & Nodes history — only append
+   **b) Update \`projects/{slug}/context.md\` and the monthly log:**
+   - Read the existing context.md. It holds only slow-changing state; dated
+     narrative lives in \`projects/{slug}/log/YYYY-MM.md\` (one file per month,
+     append-only). Never add a dated paragraph or bullet to context.md.
+   - Rewrite the **Current State** section of context.md only if this call changes
+     what is true now (a phase shipped, a decision reversed, a number moved). Keep it
+     a snapshot, not a narrative; do not add "on ${DATE} …" sentences to it.
+   - If a clear new decision was made, append ONE line to **Key Decisions** in
+     context.md: \`- **${DATE}** — [decision, one sentence] (see [log/${DATE:0:7}.md](log/${DATE:0:7}.md))\`
+   - If a new open question surfaced, add it to **Open Questions** in context.md.
+   - Append the call's substance to \`projects/{slug}/log/${DATE:0:7}.md\` as a new
+     section at the end:
+     \`\`\`
+     ## ${DATE} — ${TITLE}
+     [3-10 lines: what was discussed, what changed, decisions with their reasoning,
+     insights worth keeping. Skip entirely if the call is purely operational with
+     nothing new.]
+     Artifact: [[${ARTIFACT_PATH%.md}]]
+     \`\`\`
+     If that log file does not exist, create it with this header first
+     (template: \`.agents/templates/project/log.md\`):
+     \`\`\`
+     ---
+     type: project-log
+     project: {slug}
+     month: ${DATE:0:7}
+     ---
+
+     # {Project Name} — log ${DATE:0:7}
+     \`\`\`
+   - Do NOT rewrite existing Key Decisions, Open Questions, or log entries — only append.
+   - context.md must stay under 400 lines; if your edit would cross that, move
+     the oldest dated material you find in it to the matching log file first.
 
    **c) Append to \`projects/{slug}/open-items.md\`:**
    - Read the artifact's "Commitments & Open Items" section. If the artifact has no such
@@ -260,7 +284,7 @@ ${CANDIDATE_LINES}
    **PR title:** \`router: link ${FILENAME} to {slug}\`
    **PR body:** \`Fixes #{this_issue_number}\`
 
-**IMPORTANT:** Do NOT modify the artifact itself. Only update \`projects/{slug}/calls.md\`, \`projects/{slug}/context.md\`, \`projects/{slug}/open-items.md\` and \`projects/OPEN-ITEMS.md\`.
+**IMPORTANT:** Do NOT modify the artifact itself. Only update \`projects/{slug}/calls.md\`, \`projects/{slug}/context.md\`, \`projects/{slug}/log/${DATE:0:7}.md\`, \`projects/{slug}/open-items.md\` and \`projects/OPEN-ITEMS.md\`.
 EOF
 )
 

@@ -69,7 +69,7 @@ The separation is the point. Mix them and you can no longer tell your own positi
 
 **`knowledge_base/`** — Reusable concepts extracted from both tiers, organised by domain. Entries carry a lifecycle: **emergent → validated → canonical**, defined in `_system/knowledge_graph/taxonomy.yaml` and governed by the `knowledge-base-governance` skill. Cross-references use `[[wiki-link]]` syntax — see `.agents/conventions/wiki_links.md`.
 
-**`projects/`** — One folder per unit of client work. This directory may have been renamed during install; `_system/config.yml` records what it is called here. It supersedes any external tracker. Each folder holds `context.md` (the living record), `README.md`, `calls.md`, and `open-items.md`. The `project-creation` skill covers what a new one needs to be discoverable.
+**`projects/`** — One folder per unit of client work. This directory may have been renamed during install; `_system/config.yml` records what it is called here. It supersedes any external tracker. Each folder holds `context.md` (the snapshot of what is true now — under 400 lines, no dated narrative), `log/YYYY-MM.md` (dated entries, one file per month, append-only), `README.md`, `calls.md`, and `open-items.md`. The `project-creation` skill covers what a new one needs to be discoverable.
 
 **`services/`** — A catalog of concrete, sellable offerings drawn from real scoped work, with a status lifecycle (idea → pitched → scoped → delivered → proven). Distinct from `knowledge_base/`, which holds theory. Governed by `services-catalog`.
 

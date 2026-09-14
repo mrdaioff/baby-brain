@@ -20,6 +20,12 @@ updated: {YYYY-MM-DD}
 > to this project. Keep the four headings exactly as they are — the router
 > locates them by name.
 >
+> **This file is a snapshot, not a history.** Keep it under 400 lines and never
+> add a dated paragraph to it. Dated narrative — build-log entries, call
+> summaries, post-mortems, the reasoning behind a decision — goes in
+> `log/YYYY-MM.md` (template: `.agents/templates/project/log.md`). Key Decisions
+> gets one dated line per decision, pointing at the log entry for the reasoning.
+>
 > Delete this block once the project is real.
 
 ## Current State
