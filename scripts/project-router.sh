@@ -4,6 +4,24 @@
 #
 # Usage: bash scripts/project-router.sh <artifact_path>
 # Expects: GH_TOKEN, GH_REPO environment variables
+#
+# Tier 1 only. How a call gets routed:
+#   1. Pre-filter the artifact against projects/registry.yml on participants
+#      and keywords (a pre-filter, not the decision).
+#   2. If anything overlaps, open an issue asking the cloud agent to classify it.
+#   3. On a clear match the agent appends to the project's calls.md, log and
+#      open-items.md, updates context.md, and opens a PR.
+#
+# The contract this depends on lives in the project templates under
+# .agents/templates/project/, and the prompt below relies on it:
+#   - context.md: the headings Current State, Key Decisions, Open Questions and
+#     Notes & Nodes, located by name. Rename one and the agent writes nowhere.
+#   - calls.md and open-items.md: the templates' exact column order. Both files
+#     are optional at project creation, so the prompt creates them if missing.
+#   - open-items.md: the agent only ever appends 🔴 or ⚪ and never closes an
+#     item; only a human or a session that did the work marks ✅.
+# The templates themselves say nothing about the router, because they must
+# read correctly at Tier 0, where this script does not exist.
 
 set -euo pipefail
 
@@ -212,6 +230,9 @@ ${CANDIDATE_LINES}
    \`\`\`
    | ${DATE} | ${TITLE} | [artifact](../../${ARTIFACT_PATH}) | [transcript](../../${TRANSCRIPT_PATH}) |
    \`\`\`
+   If \`projects/{slug}/calls.md\` does not exist (projects create it on their
+   first call), create it from \`.agents/templates/project/calls.md\`: fill in
+   the frontmatter and title, drop the instruction block, keep the table header.
 
    **b) Update \`projects/{slug}/context.md\` and the monthly log:**
    - Read the existing context.md. It holds only slow-changing state; dated
