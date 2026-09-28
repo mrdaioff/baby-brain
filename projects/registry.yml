@@ -1,13 +1,15 @@
 # Project Registry
 #
-# Used by the project router to match ingested transcripts to projects. This is
-# a PRE-FILTER, not the decision — an agent makes the final call. Its job is to
-# be cheap and to avoid obviously-wrong matches.
+# One entry per project, with the names and terms that identify material
+# belonging to it. An agent filing a call or a note reads this to decide which
+# project it belongs to. It is a PRE-FILTER, not the decision — the agent makes
+# the final call. Its job is to be cheap and to avoid obviously-wrong matches.
 #
-# ROUTING RULES, learned the hard way:
+# MATCHING RULES, learned the hard way:
 #
-# - CLIENT-SIDE participants are the reliable signal. They appear on that
-#   project's calls and nowhere else.
+# - The OTHER SIDE's participants are the reliable signal. They appear on that
+#   project's calls and nowhere else. A project with no other side (a tool, a
+#   research thread) can leave participants empty and rely on keywords.
 #
 # - YOUR OWN partners and collaborators are NOT a signal, even though they are
 #   on the call. Someone who appears across many unrelated projects will match
@@ -27,8 +29,8 @@
 #     name: Human-readable project name
 #     status: active | prospect | paused | closed | demo
 #     bucket: <id from _system/config.yml buckets.list>   # only if buckets enabled
-#     participants:
-#       - Client Side Person
+#     participants:          # optional
+#       - Other Side Person
 #     keywords:
 #       - project-specific-term
 #

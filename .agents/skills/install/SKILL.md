@@ -95,12 +95,15 @@ rm -f  .env.example TROUBLESHOOTING.md scripts/project-router.sh
 ```
 
 Then trim the files that survive but still describe what you just deleted:
-`intake/README.md` documents `staging/` and the hosted pipeline, and `.gitignore`
-carries build state for tooling you may not use. **Open every directory README** — each one states
-which of its contents belong to which tier, and they are the only place some of
-that is written down.
 
-Each of those last four is easy to leave behind, and each is actively misleading if you do:
+- **`intake/README.md`** documents `staging/` and the hosted pipeline.
+- **`.gitignore`** re-includes two paths you just removed. Delete the `!.env.example` line and the
+  `!.github/logs/*.log` line together with the comment above it. It also carries build state for
+  tooling you may not use.
+- **Open every directory README** — each one states which of its contents belong to which tier,
+  and they are the only place some of that is written down.
+
+Each file in that `rm` line is easy to leave behind, and each is actively misleading if you do:
 
 - **`.env.example`** lists nothing but Tier 1 secrets. Left in place it tells the owner — and every future agent — to go configure credentials for a pipeline they declined.
 - **`TROUBLESHOOTING.md`** documents only pipeline failures. At Tier 0 there is no pipeline, and the `README.md` link to it goes in the same pass.

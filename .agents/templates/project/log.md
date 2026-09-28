@@ -12,9 +12,6 @@ month: {YYYY-MM}
 > reasoning behind a decision. `context.md` gets the one-line outcome; this
 > file gets the story.
 >
-> The project router appends a section here for every matched call, and
-> creates the month's file if it does not exist yet.
->
 > Delete this block once the first real entry lands.
 
 ## {YYYY-MM-DD} — {title}

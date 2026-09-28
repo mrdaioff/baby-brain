@@ -16,10 +16,6 @@ updated: {YYYY-MM-DD}
 > each time. The other three are append-only, dated.** A decision log you can
 > silently rewrite is a decision log nobody can trust six months later.
 >
-> The project router writes into this file automatically when a call is matched
-> to this project. Keep the four headings exactly as they are — the router
-> locates them by name.
->
 > **This file is a snapshot, not a history.** Keep it under 400 lines and never
 > add a dated paragraph to it. Dated narrative — build-log entries, call
 > summaries, post-mortems, the reasoning behind a decision — goes in
@@ -31,7 +27,7 @@ updated: {YYYY-MM-DD}
 ## Current State
 
 _Rewritten in place on every update. One or two paragraphs: where this
-engagement actually is right now, what is live, what is blocked, what is next._
+project actually is right now, what is live, what is blocked, what is next._
 
 _Be specific enough that someone returning after a month knows where to pick up
 without reading the history below._

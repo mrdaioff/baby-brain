@@ -6,30 +6,34 @@ updated: {YYYY-MM-DD}
 
 # {Project Name}
 
-> The at-a-glance view, for a human opening this folder cold. The living record
-> is `context.md` — keep the narrative there, not here.
+> Optional. The at-a-glance view, for a human opening this folder cold. Worth
+> creating once a project has other people involved or more files than
+> `context.md`. The living record is `context.md` — keep the narrative there,
+> not here. Delete any section below that has nothing to say.
 >
 > Delete this block once the project is real.
 
 **Status:** prospect
-**Client:** {company}
+**Company:** {company, if this work is for one — omit otherwise}
 **Bucket:** {which commercial context — see `_system/config.yml`; omit if you work under one banner}
 **Started:** {YYYY-MM-DD}
 
 ## Goal
 
-_One paragraph. What this engagement is supposed to achieve, in the client's
-terms rather than yours._
+_One paragraph. What this project is supposed to achieve, in the terms of
+whoever it is for._
 
 ## Stakeholders
 
+_Only if other people are involved._
+
 | Name | Role | Side | Notes |
 |---|---|---|---|
-| | | client | |
-| | | us | |
+| | | | |
 
-_Client-side names are what the router matches on. Get them into
-`projects/registry.yml` as well, or calls with this client will not route._
+_Add the names of people on the other side to that project's `participants`
+in `projects/registry.yml` too: it is how an agent recognises a call as
+belonging to this project._
 
 ## Key Files
 
@@ -37,8 +41,9 @@ _Client-side names are what the router matches on. Get them into
 |---|---|
 | [context.md](context.md) | Living record — read before working |
 | [log/](log/) | Dated entries, one file per month |
-| [calls.md](calls.md) | Call log |
-| [open-items.md](open-items.md) | Commitments and who owes what |
+
+_List only files that exist. Add `calls.md` and `open-items.md` rows when
+those files are created._
 
 ## Current State
 

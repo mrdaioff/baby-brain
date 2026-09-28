@@ -52,7 +52,7 @@ Does a speaker label match identity.aliases, or is it "Me" / "I"?
 
 A full transcript, if you have one, goes to `brand/transcripts/` under the same stem, and the two link to each other. One-way links rot; make both.
 
-**Frontmatter:** the standard fields, plus — when a teammate rather than the owner was speaking — `context: <bucket-id>` from `_system/config.yml` (omit entirely if buckets are disabled) and `client: <slug>` matching that client's folder name exactly, since the project router uses it to link the call. Omit `client` for internal meetings.
+**Frontmatter:** the standard fields, plus — when a teammate rather than the owner was speaking — `context: <bucket-id>` from `_system/config.yml` (omit entirely if buckets are disabled) and `client: <slug>` matching that client's folder name exactly, since that field is what links the call to its project. Omit `client` for internal meetings.
 
 ### Third-party → `library/<type>/`
 
@@ -151,7 +151,7 @@ Skip it for pure market theory or positioning philosophy with no offer attached,
 5. **Commitments and open items** — who owes what, by when
 6. **Concepts for knowledge_base** — what you extracted, with links
 
-Section 5 is not decorative: the project router reads it verbatim to populate a project's `open-items.md`. Record each owner exactly as stated, including commitments belonging to other people.
+Section 5 is not decorative: it is copied verbatim into the project's `open-items.md`. Record each owner exactly as stated, including commitments belonging to other people.
 
 **Transcript** (`brand/transcripts/`): the full text, linked back to its artifact.
 

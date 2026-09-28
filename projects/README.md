@@ -1,6 +1,7 @@
 # Projects
 
-One folder per unit of client work. **This directory is the source of truth for
+One folder per unit of work — a client engagement, an internal build, a
+research thread. **This directory is the source of truth for
 project context** — it supersedes any external tracker (Notion, a CRM, a
 spreadsheet). If the two disagree, this wins, and the other one gets updated.
 
@@ -15,13 +16,18 @@ projects/
   <slug>/
     context.md      — the living record. Read before working, write after.
     log/YYYY-MM.md  — dated entries, one file per month, append-only
-    README.md       — goal, stakeholders, current state at a glance
-    calls.md        — call log, linked to brand/artifacts/
-    open-items.md   — commitment tracker: who owes what, by when
-    sops/           — standard operating procedures (optional)
+    README.md       — goal, stakeholders, at a glance     (when useful)
+    calls.md        — call log, linked to brand/artifacts/ (from the first call)
+    open-items.md   — who owes what, by when               (from the first commitment)
+    sops/           — standard operating procedures        (optional)
 ```
 
-`context.md` is the important one. It has four sections:
+Only `context.md` is required. The others are created the first time they
+have something to hold — an empty table is not a record, it is a claim that
+there is nothing to record. Templates for all of them are in
+`.agents/templates/project/`.
+
+`context.md` has four sections:
 
 - **Current State** — rewritten each update, never appended to
 - **Key Decisions** — append-only, one dated line each
@@ -54,21 +60,7 @@ is a project the next person browsing the repo will not find.
 
 ## Adding one
 
-Use the `project-creation` skill. It exists because creating a project is not
-one directory and one file — a project is only really created once it is
-discoverable three ways: by a human browsing this table, by the automation that
-routes incoming calls, and by a future agent session loading context. Miss any
-one and something silently stops working.
-
-## How calls get routed
-
-At Tier 1, when a transcript is ingested into `brand/artifacts/`, the
-project router:
-
-1. Pre-filters it against `registry.yml` on participants and keywords
-2. If there is overlap, asks an agent to classify it
-3. If it is primarily about a project, appends a row to that project's
-   `calls.md` and any commitments to `open-items.md`, then opens a PR
-
-`registry.yml` is a pre-filter, not the decision. Keep it loose enough to catch
-real calls and specific enough not to catch everything.
+Use the `project-creation` skill. A project is only really created once it is
+discoverable two ways: by a human browsing this table, and by an agent matching
+new material against `registry.yml`. Miss either and the next call or note about
+it gets filed somewhere else.
