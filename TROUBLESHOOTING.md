@@ -141,6 +141,35 @@ refuses — anything outside `projects/` — and someone has to resolve it by
 hand: merge `main` into the branch, fix the file, push, and let auto-merge
 retry.
 
+### Bot-triggered runs wait for approval, and conflicting PRs run nothing
+
+Two separate GitHub behaviours can leave a PR open with no failed run to look
+at.
+
+First, when several ingestion PRs open at once, runs triggered by
+`github-actions[bot]` (the PR-open event, and every sync push auto-merge makes
+with `GITHUB_TOKEN`) can come back as `action_required`. They do nothing until
+someone approves them. Runs triggered by your own account go through.
+
+Second, GitHub runs **no** `pull_request` workflows on a PR that conflicts
+with `main`. So the union-merge step in `auto-merge.yml` never starts for
+exactly the PRs that need it.
+
+**Signatures:** `action_required` in `gh run list -b <branch>`, or no runs at
+all on the PR, even after closing and reopening it.
+
+Recovery, one PR at a time:
+
+1. Check for conflicts: `git merge-tree --write-tree origin/main origin/<branch>`.
+2. If it reports any, resolve them the way the workflow does: keep both sides
+   for `projects/**/*.md`, and regenerate `projects/OPEN-ITEMS.md` with
+   `scripts/rollup-open-items.mjs` rather than resolving it. Push from your own
+   account.
+3. Close and reopen the PR so the new run is triggered by you, not the bot.
+
+Do not do several in parallel: they compete for `main` and each one burns
+through its merge retries.
+
 ### Cleanup pushes race with everything else committing to `main`
 
 `ingest-cleanup.yml` moves the source file from `inbox/` to `processed/` and
